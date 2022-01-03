@@ -34,14 +34,13 @@ fun <T> Fragment.Pipe(
 
 
 class Pipe internal constructor(
-    private val hostActivity: AppCompatActivity? = null,
-    private val hostFragment: Fragment? = null,
-    private var viewModel: KClass<ViewModel>? = null,
-    private val backgroundDispatcher: CoroutineContext = Dispatchers.IO
+    val hostActivity: AppCompatActivity? = null,
+    val hostFragment: Fragment? = null,
+    val viewModel: KClass<ViewModel>? = null,
+    val businessRules: MutableList<() -> PipeFilter> = mutableListOf(),
+    val repositories: MutableList<() -> PipeFilter> = mutableListOf(),
+    val backgroundDispatcher: CoroutineContext = Dispatchers.IO
 ) {
-
-    private var businessRules = mutableListOf<() -> PipeFilter>()
-    private var repositories = mutableListOf<() -> PipeFilter>()
 
     @PipeDsl
     fun addBusinessRule(businessRuleFactory: () -> PipeFilter): Pipe {
@@ -63,23 +62,24 @@ class Pipe internal constructor(
         viewModel.intents.observe(lifecycleOwner) { pipeData ->
             jobs[pipeData.type]?.cancel()
             jobs[pipeData.type] = scope.launch(backgroundDispatcher) {
-                viewModel.mapNonNull(pipeData)
-                    .let { businessRules.lazyInvoke(it) }
-                    .let { repositories.lazyInvoke(it) }
-                    .let { businessRules.lazyInvoke(it) }
-                    .let { viewModel.mapNonNull(it) }
+                viewModel.map(pipeData)
+                    .let { businessRules.map(it) }
+                    .let { repositories.map(it) }
+                    .let { businessRules.map(it) }
+                    .let { viewModel.map(it) }
                     .let(::PipeData)
                     .let(viewModel.viewStates::postValue)
             }
         }
 
-        viewModel.viewStates.observe(lifecycleOwner) {
-            onUpdate(Stream(viewModel.intents, it))
+        viewModel.viewStates.observe(lifecycleOwner) { pipeData ->
+            val stream = Stream(viewModel.intents, pipeData)
+            onUpdate(stream)
         }
 
     }
 
-    private fun assertBuilderComplete(
+    fun assertBuilderComplete(
         hostActivity: AppCompatActivity?,
         hostFragment: Fragment?
     ): Triple<ViewModelFilter, LifecycleOwner, CoroutineScope> {
@@ -111,10 +111,12 @@ class Pipe internal constructor(
         }
 
         @PipeDsl
-        inline fun <reified T> onReceive(handler: (T) -> Unit) {
-            val data = pipeData.getNullableData<T>() ?: return
-            handler(data)
-        }
+        inline fun <reified T> getDataOrCrash() =
+            pipeData.getNullableData<T>() ?: throw IllegalStateException("data is null")
+
+        @PipeDsl
+        inline fun <reified T> getData() = pipeData.getNullableData<T>()
+
     }
 
     interface ViewModelFilter : PipeFilter {
@@ -134,11 +136,11 @@ annotation class PipeDsl
 interface PipeFilter {
 
     @PipeDsl
-    suspend fun mapNonNull(pipeData: PipeData): PipeData = pipeData
+    suspend fun map(pipeData: PipeData): PipeData = pipeData
 }
 
-private suspend fun List<() -> PipeFilter>.lazyInvoke(initialParameter: PipeData) =
-    fold(initialParameter) { first, second -> second().mapNonNull(first) }
+suspend fun List<() -> PipeFilter>.map(initialParameter: PipeData) =
+    fold(initialParameter) { first, second -> second().map(first) }
 
 @PipeDsl
 inline fun <reified T> PipeData(data: T? = null) = PipeData(T::class, data)

@@ -26,36 +26,37 @@ class LoginActivity : AppCompatActivity() {
         setContentView(R.layout.activity_login)
         Pipe(LoginViewModel::class)
             .addRepository(::LoginRepository)
-            .observe { stream ->
+            .observe(::render)
 
-                stream.onReceive<Login.Data> { viewState ->
-                    progressBar.isVisible = viewState.progressBarVisible
+    }
 
-                    if (viewState.error != null) {
-                        errorMessageView.text = viewState.error.toString()
-                        stream.post(Login.Command.OnErrorDisplayed(viewState))
-                    } else {
-                        errorMessageView.text = null
-                    }
+    private fun render(stream: Pipe.Stream) {
+        val viewState = stream.getData<Login.Data>() ?: return
+        progressBar.isVisible = viewState.progressBarVisible
 
-                    if (viewState.userToken != null) {
-                        startActivity(Intent(this, MainActivity::class.java))
-                        finish()
-                    }
+        if (viewState.error != null) {
+            errorMessageView.text = viewState.error.toString()
+            stream.post(Login.Command.OnErrorDisplayed(viewState))
+        } else {
+            errorMessageView.text = null
+        }
 
-                    loginButton.setOnClickListener {
-                        progressBar.isVisible = true
-                        stream.post(
-                            Login.Command.OnRequest(
-                                viewState.copy(
-                                    userName = userName.text?.toString(),
-                                    password = password.text?.toString()
-                                )
-                            )
-                        )
-                    }
-                }
-            }
+        if (viewState.userToken != null) {
+            startActivity(Intent(this, MainActivity::class.java))
+            finish()
+        }
+
+        loginButton.setOnClickListener {
+            progressBar.isVisible = true
+            stream.post(
+                Login.Command.OnRequest(
+                    viewState.copy(
+                        userName = userName.text?.toString(),
+                        password = password.text?.toString()
+                    )
+                )
+            )
+        }
     }
 
 
