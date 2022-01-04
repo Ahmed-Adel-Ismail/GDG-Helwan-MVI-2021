@@ -1,19 +1,17 @@
 package com.mvi.sample.login.cqrs
 
-import com.mvi.sample.login.UserToken
 
 
 
 sealed class Login {
-    abstract val state: Data
+    abstract val data: Data
 
     sealed class Command : Login() {
-        class OnRequest(override val state: Data) : Command()
-        class OnErrorDisplayed(override val state: Data) : Command()
+        class OnRequest(override val data: Data) : Command()
     }
 
     sealed class Query : Login() {
-        class OnResponse(override val state: Data) : Command()
+        class OnResponse(override val data: Data) : Command()
     }
 
     data class Data(
@@ -21,7 +19,7 @@ sealed class Login {
         val password: String? = null,
         val progressBarVisible: Boolean = false,
         val error: Throwable? = null,
-        val userToken: UserToken? = null
+        val token: String? = null
     )
 
 

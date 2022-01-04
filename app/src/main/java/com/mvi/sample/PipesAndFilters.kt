@@ -1,3 +1,5 @@
+@file:Suppress("FunctionName")
+
 package com.mvi.sample
 
 import androidx.appcompat.app.AppCompatActivity
@@ -10,148 +12,167 @@ import kotlinx.coroutines.launch
 import kotlin.coroutines.CoroutineContext
 import kotlin.reflect.KClass
 
-// integration module (android)
+@DslMarker
+annotation class FeatureDsl
 
-@PipeDsl
-fun <T> AppCompatActivity.Pipe(
-    viewModelType: KClass<T>,
-    backgroundDispatcher: CoroutineContext = Dispatchers.IO
-) where T : ViewModel, T : Pipe.ViewModelFilter = Pipe(
-    hostActivity = this,
-    viewModel = viewModelType as KClass<ViewModel>,
+
+class StreamsFeatureViewModel(
+    override val commands: MutableLiveData<StreamData> = MutableLiveData(),
+    override val queries: MutableLiveData<StreamData> = MutableLiveData(),
+    override val commandsJobs: MutableMap<KClass<*>, Job?> = mutableMapOf(),
+    override val queriesJobs: MutableMap<KClass<*>, Job?> = mutableMapOf()
+) : ViewModel(), FeatureViewModel {
+    override fun onCleared() {
+        super.onCleared()
+        commandsJobs.values.forEach { it?.cancel() }
+        queriesJobs.values.forEach { it?.cancel() }
+    }
+}
+
+@FeatureDsl
+fun LifecycleOwner.feature(
+    mainDispatcher: CoroutineContext = Dispatchers.Main,
+    backgroundDispatcher: CoroutineContext = Dispatchers.IO,
+    builder: FeatureBuilder<StreamsFeatureViewModel>.() -> Unit
+) = FeatureBuilder(
+    lifecycleOwner = this,
+    viewModel = viewModelFactory(StreamsFeatureViewModel::class),
+    mainDispatcher = mainDispatcher,
     backgroundDispatcher = backgroundDispatcher
 )
 
-@PipeDsl
-fun <T> Fragment.Pipe(
-    viewModelType: KClass<T>,
-    backgroundDispatcher: CoroutineContext = Dispatchers.IO
-) where T : ViewModel, T : Pipe.ViewModelFilter = Pipe(
-    hostFragment = this,
-    viewModel = viewModelType as KClass<ViewModel>,
-    backgroundDispatcher = backgroundDispatcher
-)
+private fun <T> LifecycleOwner.viewModelFactory(viewModelType: KClass<T>) where T : ViewModel, T : FeatureViewModel =
+    when (this) {
+        is AppCompatActivity -> ViewModelProvider(this)[viewModelType.java]
+        is Fragment -> ViewModelProvider(this)[viewModelType.java]
+        else -> viewModelType.java.newInstance()
+    }
 
 
-class Pipe internal constructor(
-    val hostActivity: AppCompatActivity? = null,
-    val hostFragment: Fragment? = null,
-    val viewModel: KClass<ViewModel>? = null,
-    val businessRules: MutableList<() -> PipeFilter> = mutableListOf(),
-    val repositories: MutableList<() -> PipeFilter> = mutableListOf(),
-    val backgroundDispatcher: CoroutineContext = Dispatchers.IO
+class FeatureBuilder<T> internal constructor(
+    private val lifecycleOwner: LifecycleOwner?,
+    private val viewModel: T,
+    private val components: MutableList<Lazy<FeatureComponent>> = mutableListOf(),
+    private val mainDispatcher: CoroutineContext = Dispatchers.IO,
+    private val backgroundDispatcher: CoroutineContext = Dispatchers.IO
+) where T : ViewModel, T : FeatureViewModel {
+
+    @FeatureDsl
+    val with = this
+
+    @FeatureDsl
+    infix fun component(component: FeatureComponent): FeatureBuilder<T> {
+        components += lazy { component }
+        return this
+    }
+
+    @FeatureDsl
+    infix fun component(componentImplementation: suspend FeatureComponent.(FeatureStream) -> Unit): FeatureBuilder<T> {
+        return component(object : FeatureComponent {
+            override suspend fun onReceive(streams: FeatureStream) {
+                componentImplementation(streams)
+            }
+        })
+    }
+
+    @FeatureDsl
+    infix fun component(componentFactory: () -> FeatureComponent): FeatureBuilder<T> {
+        components += lazy(componentFactory)
+        return this
+    }
+
+    @FeatureDsl
+    infix fun render(onBuild: (FeatureStream) -> Unit) {
+
+        if (lifecycleOwner != null) {
+            viewModel.commands.observe(lifecycleOwner) { onCommand(it, onBuild) }
+            viewModel.queries.observe(lifecycleOwner) { onQuery(it, onBuild) }
+        } else {
+            viewModel.commands.observeForever { onCommand(it, onBuild) }
+            viewModel.queries.observeForever { onQuery(it, onBuild) }
+        }
+
+
+    }
+
+
+    private fun onCommand(data: StreamData, onUpdate: (FeatureStream) -> Unit) {
+        val stream = FeatureStream(viewModel.commands, viewModel.queries, data)
+        viewModel.commandsJobs[data.type]?.cancel()
+        viewModel.commandsJobs[data.type] = viewModel.viewModelScope.launch(backgroundDispatcher) {
+            runCatching {
+                launch(mainDispatcher) { onUpdate(stream) }
+                launch { viewModel.onReceive(stream) }
+                launch { components.onReceiveAsync(this, stream) }
+            }.onFailure { it.printStackTrace() }
+        }
+    }
+
+    private fun onQuery(data: StreamData, onUpdate: (FeatureStream) -> Unit) {
+        val stream = FeatureStream(viewModel.commands, viewModel.queries, data)
+        viewModel.queriesJobs[data.type]?.cancel()
+        viewModel.queriesJobs[data.type] = viewModel.viewModelScope.launch(backgroundDispatcher) {
+            runCatching {
+                launch { components.onReceiveAsync(this, stream) }
+                launch { viewModel.onReceive(stream) }
+                launch(mainDispatcher) { onUpdate(stream) }
+            }.onFailure { it.printStackTrace() }
+        }
+    }
+}
+
+interface FeatureViewModel : FeatureComponent {
+    val commands: MutableLiveData<StreamData>
+    val queries: MutableLiveData<StreamData>
+    val commandsJobs: MutableMap<KClass<*>, Job?>
+    val queriesJobs: MutableMap<KClass<*>, Job?>
+}
+
+class FeatureStream(
+    val commands: MutableLiveData<StreamData>,
+    val queries: MutableLiveData<StreamData>,
+    val streamData: StreamData
 ) {
 
-    @PipeDsl
-    fun addBusinessRule(businessRuleFactory: () -> PipeFilter): Pipe {
-        businessRules += businessRuleFactory
+    @FeatureDsl
+    inline fun <reified T> postCommand(data: T? = null) {
+        commands.postValue(StreamData(data))
+    }
+
+    @FeatureDsl
+    inline fun <reified T> postQuery(data: T? = null) {
+        queries.postValue(StreamData(data))
+    }
+
+    @FeatureDsl
+    inline fun <reified T> onReceive(handler: (T) -> Unit): FeatureStream {
+        val data = streamData.getNullableData<T>() ?: return this
+        handler(data)
         return this
     }
 
-    @PipeDsl
-    fun addRepository(repositoryFactory: () -> PipeFilter): Pipe {
-        repositories += repositoryFactory
-        return this
-    }
-
-    @PipeDsl
-    fun observe(onUpdate: (Stream) -> Unit) {
-        val (viewModel, lifecycleOwner, scope) = assertBuilderComplete(hostActivity, hostFragment)
-
-        val jobs = mutableMapOf<KClass<*>, Job?>()
-        viewModel.intents.observe(lifecycleOwner) { pipeData ->
-            jobs[pipeData.type]?.cancel()
-            jobs[pipeData.type] = scope.launch(backgroundDispatcher) {
-                viewModel.map(pipeData)
-                    .let { businessRules.map(it) }
-                    .let { repositories.map(it) }
-                    .let { businessRules.map(it) }
-                    .let { viewModel.map(it) }
-                    .let(::PipeData)
-                    .let(viewModel.viewStates::postValue)
-            }
-        }
-
-        viewModel.viewStates.observe(lifecycleOwner) { pipeData ->
-            val stream = Stream(viewModel.intents, pipeData)
-            onUpdate(stream)
-        }
-
-    }
-
-    fun assertBuilderComplete(
-        hostActivity: AppCompatActivity?,
-        hostFragment: Fragment?
-    ): Triple<ViewModelFilter, LifecycleOwner, CoroutineScope> {
-
-        val lifecycleOwner: LifecycleOwner
-        val finalViewModelType =
-            viewModel ?: throw IllegalStateException("viewModel must not be null")
-
-        val viewModel = when {
-            hostActivity != null -> {
-                lifecycleOwner = hostActivity
-                ViewModelProvider(hostActivity)[finalViewModelType.java] as ViewModelFilter
-            }
-            hostFragment != null -> {
-                lifecycleOwner = hostFragment
-                ViewModelProvider(hostFragment)[finalViewModelType.java] as ViewModelFilter
-            }
-            else -> throw UnsupportedOperationException("hostActivity or hostFragment must not be null")
-        }
-        return Triple(viewModel, lifecycleOwner, (viewModel as ViewModel).viewModelScope)
-    }
-
-
-    class Stream(val liveData: MutableLiveData<PipeData>, val pipeData: PipeData) {
-
-        @PipeDsl
-        inline fun <reified T> post(data: T? = null) {
-            liveData.postValue(PipeData(data))
-        }
-
-        @PipeDsl
-        inline fun <reified T> getDataOrCrash() =
-            pipeData.getNullableData<T>() ?: throw IllegalStateException("data is null")
-
-        @PipeDsl
-        inline fun <reified T> getData() = pipeData.getNullableData<T>()
-
-    }
-
-    interface ViewModelFilter : PipeFilter {
-        val intents: MutableLiveData<PipeData>
-        val viewStates: MutableLiveData<PipeData>
-    }
-
 }
 
 
-// core module (kotlin)
-
-@DslMarker
-annotation class PipeDsl
-
-
-interface PipeFilter {
-
-    @PipeDsl
-    suspend fun map(pipeData: PipeData): PipeData = pipeData
+interface FeatureComponent {
+    @FeatureDsl
+    suspend fun onReceive(streams: FeatureStream) = Unit
 }
 
-suspend fun List<() -> PipeFilter>.map(initialParameter: PipeData) =
-    fold(initialParameter) { first, second -> second().map(first) }
+@FeatureDsl
+fun List<Lazy<FeatureComponent>>.onReceiveAsync(
+    coroutineScope: CoroutineScope,
+    streams: FeatureStream
+) =
+    forEach {
+        coroutineScope.launch { it.value.onReceive(streams) }
+    }
 
-@PipeDsl
-inline fun <reified T> PipeData(data: T? = null) = PipeData(T::class, data)
+@FeatureDsl
+inline fun <reified T> StreamData(data: T? = null) = StreamData(T::class, data)
 
-@PipeDsl
-inline fun <reified T, reified R> PipeData.mapNotNull(mapper: (T) -> R): PipeData {
-    val data = getNullableData<T>() ?: return this
-    return PipeData(mapper(data))
-}
 
-data class PipeData(
+data class StreamData(
     val type: KClass<*>,
     val data: Any? = null,
     val timestamp: Long = System.currentTimeMillis(),
@@ -160,9 +181,5 @@ data class PipeData(
 
     fun updateTimestamp() = copy(timestamp = System.currentTimeMillis())
 }
-
-
-@PipeDsl
-inline fun <reified T> withPipeData(data: T? = null) = PipeData(T::class, data)
 
 
