@@ -8,6 +8,7 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.isVisible
+import com.mvi.sample.FeatureStream
 import com.mvi.sample.R
 import com.mvi.sample.feature
 import com.mvi.sample.login.MainActivity
@@ -28,17 +29,26 @@ class LoginActivity : AppCompatActivity() {
         setContentView(R.layout.activity_login)
 
         feature {
+            with component ::CredentialsValidator
+            with component ::LoginDataSources
+            render<Login.Data> { stream, data -> updateViews(data, stream) }
+        }
+
+
+        feature {
 
             with component { stream ->
                 stream.onReceive<Login.Command.OnRequest> {
                     if (it.data.userName.isNullOrEmpty() || it.data.password.isNullOrEmpty()) {
-                        stream.postQuery(
-                            Login.Query.OnResponse(
-                                data = it.data.copy(
-                                    error = IllegalArgumentException("user name or password is not valid")
+                        stream.cancel {
+                            stream.postQuery(
+                                Login.Query.OnResponse(
+                                    data = it.data.copy(
+                                        error = IllegalArgumentException("user name or password is not valid")
+                                    )
                                 )
                             )
-                        )
+                        }
                     }
                 }
             }
@@ -68,34 +78,53 @@ class LoginActivity : AppCompatActivity() {
             }
 
 
-            render { stream ->
+            render<Login.Data> { stream, data ->
 
-                stream.onReceive<Login.Data> { data ->
-                    progressBar.isVisible = data.progressBarVisible
+                progressBar.isVisible = data.progressBarVisible
 
-                    errorMessageView.text = if (data.error != null) data.error.toString() else null
+                errorMessageView.text = if (data.error != null) data.error.toString() else null
 
-                    if (data.token != null) {
-                        startActivity(Intent(this@LoginActivity, MainActivity::class.java))
-                        finish()
-                    }
+                if (data.token != null) startMainActivity()
 
-                    loginButton.setOnClickListener {
-                        progressBar.isVisible = true
-                        stream.postCommand(
-                            Login.Command.OnRequest(
-                                data.copy(
-                                    userName = userName.text?.toString(),
-                                    password = password.text?.toString()
-                                )
+                loginButton.setOnClickListener {
+                    progressBar.isVisible = true
+                    stream.postCommand(
+                        Login.Command.OnRequest(
+                            data.copy(
+                                userName = userName.text?.toString(),
+                                password = password.text?.toString()
                             )
                         )
-                    }
-
+                    )
                 }
             }
 
         }
+    }
+
+    private fun updateViews(data: Login.Data, stream: FeatureStream) {
+        progressBar.isVisible = data.progressBarVisible
+
+        errorMessageView.text = if (data.error != null) data.error.toString() else null
+
+        if (data.token != null) startMainActivity()
+
+        loginButton.setOnClickListener {
+            progressBar.isVisible = true
+            stream.postCommand(
+                Login.Command.OnRequest(
+                    data.copy(
+                        userName = userName.text?.toString(),
+                        password = password.text?.toString()
+                    )
+                )
+            )
+        }
+    }
+
+    private fun startMainActivity() {
+        startActivity(Intent(this, MainActivity::class.java))
+        finish()
     }
 }
 

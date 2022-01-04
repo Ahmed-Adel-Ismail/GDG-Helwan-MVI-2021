@@ -4,7 +4,7 @@ import com.mvi.sample.FeatureComponent
 import com.mvi.sample.FeatureStream
 
 class LoginDataSources(private val server: Server = Server()) : FeatureComponent {
-    override suspend fun onReceive(streams: FeatureStream) {
+    override suspend fun onReceive(streams: FeatureStream) =
         streams.onReceive<Login.Command.OnRequest> {
             streams.postQuery(
                 runCatching {
@@ -22,7 +22,6 @@ class LoginDataSources(private val server: Server = Server()) : FeatureComponent
                 }
             )
         }
-    }
 
 }
 
