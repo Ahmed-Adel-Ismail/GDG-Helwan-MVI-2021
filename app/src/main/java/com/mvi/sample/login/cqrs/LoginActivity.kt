@@ -100,6 +100,8 @@ class LoginActivity : AppCompatActivity() {
             }
 
         }
+
+
     }
 
     private fun updateViews(data: Login.Data, stream: FeatureStream) {
