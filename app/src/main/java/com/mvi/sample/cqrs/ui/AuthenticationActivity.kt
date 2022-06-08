@@ -31,6 +31,9 @@ class AuthenticationActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_login)
 
+        // should be done in the default visibility of the view
+        progressBar.isVisible = true
+
         feature {
             with component ::SignUpValidator
             with component ::SignInValidator
