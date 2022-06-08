@@ -14,8 +14,8 @@ sealed class Authentication {
     }
 
     sealed class Query : Authentication() {
-        class SignUp(override val data: Data) : Command()
-        class SignIn(override val data: Data) : Command()
+        class SignUp(override val data: Data) : Query()
+        class SignIn(override val data: Data) : Query()
     }
 
     data class Data(

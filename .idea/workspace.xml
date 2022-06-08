@@ -9,8 +9,8 @@
     <option name="autoReloadType" value="NONE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="7b15b346-6112-4c70-98b6-f3ab43a6ed46" name="Default Changelist" comment="">
-      <change beforePath="$PROJECT_DIR$/app/src/main/java/com/mvi/sample/cqrs/ui/AuthenticationActivity.kt" beforeDir="false" afterPath="$PROJECT_DIR$/app/src/main/java/com/mvi/sample/cqrs/ui/AuthenticationActivity.kt" afterDir="false" />
+    <list default="true" id="7b15b346-6112-4c70-98b6-f3ab43a6ed46" name="Default Changelist" comment="putting files into there places, still need to divide the engine between the core and the presentation">
+      <change beforePath="$PROJECT_DIR$/app/src/main/java/com/mvi/sample/cqrs/core/business/Authentication.kt" beforeDir="false" afterPath="$PROJECT_DIR$/app/src/main/java/com/mvi/sample/cqrs/core/business/Authentication.kt" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -25,6 +25,16 @@
     <projectState path="$PROJECT_DIR$">
       <ProjectState />
     </projectState>
+  </component>
+  <component name="ExternalProjectsManager">
+    <system id="GRADLE">
+      <state>
+        <task path="$PROJECT_DIR$">
+          <activation />
+        </task>
+        <projects_view />
+      </state>
+    </system>
   </component>
   <component name="FileTemplateManagerImpl">
     <option name="RECENT_TEMPLATES">
