@@ -10,6 +10,9 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.MviSample">
         <activity
+            android:name=".exercise.ui_module.ExerciseActivity"
+            android:exported="false" />
+        <activity
             android:name=".login.MainActivity"
             android:exported="false" />
         <activity
